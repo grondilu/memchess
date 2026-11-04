@@ -18,6 +18,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Write version.json
         run: |
           printf '{"branch": "%s", "commit": "%s", "dirty": false}\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" > version.json
