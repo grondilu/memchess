@@ -1154,28 +1154,33 @@ function addToolTipToOpening(name) {
   });
 }
 
-// Small offline board for the chooser tooltips (replaces img/openings/*.png).
+// Small offline board for the chooser tooltips, drawn as SVG with pieces cropped
+// from img/chess-pieces-sprite.svg (Wikimedia Commons, CC BY-SA 3.0, see CREDITS.md).
+// Sprite layout: 45x45 cells, columns K Q B N R P, row 0 white, row 1 black.
 function miniBoardHtml(fen, flipped) {
-  var glyph = {K:'\u2654',Q:'\u2655',R:'\u2656',B:'\u2657',N:'\u2658',P:'\u2659',
-               k:'\u265A',q:'\u265B',r:'\u265C',b:'\u265D',n:'\u265E',p:'\u265F'};
+  var col = {k:0, q:1, b:2, n:3, r:4, p:5};
   var rows = (fen || '8/8/8/8/8/8/8/8').split(' ')[0].split('/').map(function(r) {
     var cells = [];
     for (var i = 0; i < r.length; ++i) {
       if (/[1-8]/.test(r[i])) for (var k = 0; k < +r[i]; ++k) cells.push('');
-      else cells.push(glyph[r[i]] || '');
+      else cells.push(r[i]);
     }
     return cells;
   });
   if (flipped) rows = rows.reverse().map(function(r) { return r.slice().reverse(); });
-  var html = "<table style='border-collapse:collapse;margin-bottom:4px'>";
+  var svg = "<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 360 360' style='display:block;margin-bottom:4px'>";
   for (var y = 0; y < 8; ++y) {
-    html += '<tr>';
-    for (var x = 0; x < 8; ++x)
-      html += "<td style='width:20px;height:20px;padding:0;text-align:center;font-size:17px;line-height:20px;background:" +
-        ((x + y) % 2 ? '#b58862' : '#f0d9b5') + "'>" + rows[y][x] + '</td>';
-    html += '</tr>';
+    for (var x = 0; x < 8; ++x) {
+      svg += "<rect x='" + x*45 + "' y='" + y*45 + "' width='45' height='45' fill='" +
+        ((x + y) % 2 ? '#b58863' : '#f0d9b5') + "'/>";
+      var p = rows[y][x];
+      if (!p) continue;
+      var sx = col[p.toLowerCase()] * 45, sy = (p === p.toUpperCase() ? 0 : 45);
+      svg += "<svg x='" + x*45 + "' y='" + y*45 + "' width='45' height='45' viewBox='" + sx + " " + sy +
+        " 45 45'><image href='img/chess-pieces-sprite.svg' width='270' height='90'/></svg>";
+    }
   }
-  return html + '</table>';
+  return svg + '</svg>';
 }
 
 // Opening name of a position sequence: deepest lichess position reached.
