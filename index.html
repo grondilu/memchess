@@ -44,6 +44,19 @@
 			<div class="underBoard" id="warning">
 			</div>
 
+			<div class="underBoard" id="version" style="font-size: 11px; opacity: 0.6; user-select: text"></div>
+			<script type="text/javascript">
+				fetch("version.json", {cache: "no-store"}).then(function (r) { return r.json(); }).then(function (v) {
+					var sha = v.commit || "";
+					var el = document.getElementById("version");
+					el.textContent = "Version : branche " + (v.branch || "?") + ", commit ";
+					var a = document.createElement("a");
+					a.href = "https://github.com/grondilu/memchess/commit/" + sha;
+					a.textContent = sha.slice(0, 7) || "?";
+					el.appendChild(a);
+				}).catch(function () {});
+			</script>
+
 			<div id="controls">
 				<button type="button" class="ui-button ui-widget ui-state-default ui-corner-all ui-button-text-only" id="btnnew" role="button"><span class="ui-button-text">New</span></button>
 				<button type="button" class="ui-button ui-widget ui-state-default ui-corner-all ui-button-text-only" id="btnflip" role="button"><span class="ui-button-text">Flip</span></button>
