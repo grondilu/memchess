@@ -78,7 +78,7 @@ OPENING_NAMES_JS_REL = Path("js/opening_names.js")
 @dataclass(frozen=True)
 class OpeningEntry:
     name: str          # Display name (English)
-    moves_str: str     # Concatenated SAN sequence from opening_book_moves
+    moves_str: str     # Space-separated SAN sequence from opening_book_moves
     element_id: str    # Memchess ID: name stripped of non-alphanumeric
 
 
@@ -162,9 +162,12 @@ def list_targets(memchess_root: Path, entries: List[OpeningEntry], force: bool) 
 
 def split_string_into_moves(history: str) -> List[str]:
     """
+    Current format: space-separated SAN ("e4 c5 Nf3").
     Legacy Memchess format: SAN moves concatenated without separators.
     This replicates the original split logic used by Memchess.
     """
+    if " " in history or history == "":
+        return history.split()  # current format: space-separated SAN
     moves: List[str] = []
     while history:
         if history.startswith("O-O-O"):

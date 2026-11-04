@@ -19,6 +19,79 @@ if (!self.__WB_pmw) { self.__WB_pmw = function(obj) { this.__WB_source = obj; re
     throw "no web storage";
   }
 
+  // Move lines are stored as space-separated SAN, e.g. "e4 c5 Nf3".
+  // Older versions concatenated moves ("e4c5Nf3"); see migrateStorage().
+  const STORAGE_FORMAT_KEY = 'memchess/storage-format';
+  const STORAGE_FORMAT = '2';
+
+  // Is `prefix` a whole-move prefix of `line`? ('e4 c5' of 'e4 c5 Nf3', not of 'e4 c55')
+  function isLinePrefix(prefix, line) {
+    return prefix === '' || line === prefix || line.startsWith(prefix + ' ');
+  }
+
+  // Split an old concatenated line into SAN moves by replaying it with chess.js,
+  // so tokenization is exact. Returns null if it is not a legal move sequence.
+  function splitConcatenatedLine(text) {
+    var game = new Chess();
+    function rec(rest) {
+      if (rest === '') return [];
+      var cands = [];
+      game.moves().forEach(function (san) {
+        var bare = san.replace(/[+#]+$/, '');
+        if (rest.indexOf(bare) === 0) {
+          var n = bare.length;
+          while (n < rest.length && (rest[n] === '+' || rest[n] === '#')) n++;
+          cands.push([san, rest.substring(0, n)]);
+        }
+      });
+      cands.sort(function (a, b) { return b[1].length - a[1].length; });
+      for (var i = 0; i < cands.length; ++i) {
+        game.move(cands[i][0]);
+        var r = rec(rest.substring(cands[i][1].length));
+        game.undo();
+        if (r !== null) return [cands[i][1]].concat(r);
+      }
+      return null;
+    }
+    var tokens = rec(text);
+    if (tokens === null) {
+      tokens = text.match(halfMoveRegex);
+      if (!tokens || tokens.join('') !== text) return null;
+    }
+    return tokens;
+  }
+
+  // Convert a progress key ("<moves>/white") from the old format if needed.
+  function normalizeProgressKey(key) {
+    var m = /^(.*)\/(white|black)$/.exec(key);
+    if (!m || m[1] === '' || m[1].indexOf(' ') >= 0) return key;
+    var tokens = splitConcatenatedLine(m[1]);
+    return tokens ? tokens.join(' ') + '/' + m[2] : key;
+  }
+
+  // One-time migration of localStorage progress to space-separated keys.
+  // Old keys are kept (never deleted), so going back to an older version still works.
+  function migrateStorage(storage) {
+    if (storage.getItem(STORAGE_FORMAT_KEY) === STORAGE_FORMAT) return 0;
+    var keys = [], migrated = 0;
+    for (var i = 0; i < storage.length; ++i) keys.push(storage.key(i));
+    keys.forEach(function (key) {
+      var newKey = normalizeProgressKey(key);
+      if (newKey === key) return;
+      if (storage.getItem(newKey) === null) {
+        storage.setItem(newKey, storage.getItem(key));
+        migrated++;
+      }
+    });
+    storage.setItem(STORAGE_FORMAT_KEY, STORAGE_FORMAT);
+    if (migrated) console.log('memchess: migrated ' + migrated + ' progress entries to the new line format');
+    return migrated;
+  }
+  if (typeof window !== 'undefined') window.memchessStorage = {
+    isLinePrefix, splitConcatenatedLine, normalizeProgressKey, migrateStorage
+  };
+  migrateStorage(localStorage);
+
   var selectedOpeningBook = [];
   const cfg = {
     showNotation: false,
@@ -84,7 +157,7 @@ if (!self.__WB_pmw) { self.__WB_pmw = function(obj) { this.__WB_source = obj; re
       .then(t => t.json())
       .then(json => {
 	  for (let key in json) {
-	    localStorage.setItem(key, json[key]);
+	    localStorage.setItem(normalizeProgressKey(key), json[key]);
 	  }
 	  console.log(Object.keys(json).length + ' candidate lines imported');
 	}
@@ -328,7 +401,7 @@ if (!self.__WB_pmw) { self.__WB_pmw = function(obj) { this.__WB_source = obj; re
     lineArray = splitStringIntoMoves(line);
     var candidateOpeningLine = '';
     for (var i = 0; i < lineArray.length; ++i) {
-      candidateOpeningLine += lineArray[i];
+      candidateOpeningLine += (i > 0 ? ' ' : '') + lineArray[i];
       if (candidateOpeningLine in opening_book) {
         if (chessy.orientation() == 'white') {
           if (!this.whiteLinesReverse[line].includes(candidateOpeningLine)) continue;
@@ -700,7 +773,7 @@ $("#btnnew").click(function() {
       if (currentLine === null) {
         nextMove = '';
       } else {
-        nextMove = getNextMove(chessy.history().join(''), currentLine);
+        nextMove = getNextMove(chessy.history().join(' '), currentLine);
       }
     }
 
@@ -720,7 +793,7 @@ $("#btnundo").click(function() {
   $("#warning").text("");
   chessy.undoPlayerMove();
   updateOpeningText();
-  nextMove = getNextMove(chessy.history().join(''), currentLine);
+  nextMove = getNextMove(chessy.history().join(' '), currentLine);
 });
 
 $("#helpbtn").click(function() {
@@ -856,7 +929,7 @@ $("body").on("click", ".openingLineName", function(e) {
     if (currentLine === null) {
       nextMove = '';
     } else {
-      nextMove = getNextMove(chessy.history().join(''), currentLine);
+      nextMove = getNextMove(chessy.history().join(' '), currentLine);
     }
     if (!isPlayersTurn()) setTimeout(makeOpponentMove, 500);
   }
@@ -949,7 +1022,7 @@ function getGames(gamePage) {
   $("#btnGetGames").addClass("inProgressBtn");
   $("#gamesBox").html("");
   $("#gamesBox").append('<img id="gamesLoadingIcon" src="img/loading.svg" height="30" width="30">');
-  $.post( "api.php", { action: 'getgames', moves: chessy.history().join(''), page: gamePage }, function( data ) {
+  $.post( "api.php", { action: 'getgames', moves: chessy.history().join(' '), page: gamePage }, function( data ) {
     $("#gamesLoadingIcon").remove();
     $("#btnGetGames").removeClass("inProgressBtn");
     data = JSON.parse(data)
@@ -1058,7 +1131,7 @@ function newGame() {
     showMessage('openingneededdlg', 'Note', '130px');
     nextMove = '';
   } else {
-    nextMove = getNextMove(chessy.history().join(''), currentLine);
+    nextMove = getNextMove(chessy.history().join(' '), currentLine);
   }
   //displayComments();
   if (!chessy.isPlayersTurn()) setTimeout(makeOpponentMove, 500);
@@ -1097,18 +1170,7 @@ function addToolTipToOpening(name) {
 }
 
 function countMoves(s) {
-  var countdigits = 0, countos = 0;
-  for (var j = 0; j < s.length; ++j) {
-    if (s[j] >= '0' && s[j] <= '9') {
-      countdigits++;
-    } else if (s[j] == 'O') {
-      countos++;
-    }
-  }
-  var nummoves = countdigits;
-  if (countos == 2 || countos == 3) nummoves++;
-  if (countos == 4 || countos == 5 || countos == 6) nummoves++;
-  return nummoves;
+  return splitStringIntoMoves(s).length;
 }
 
 function showHint() {
@@ -1176,12 +1238,10 @@ function onDrop(source, target) {
   if (nextMove != move['san']) {
     // Perhaps it is from a different selected opening?
     var isFromOtherOpening = false;
-    var allMoves = chessy.game.history().join('');
+    var allMoves = chessy.game.history().join(' ');
     var candidateOpenings = [];
     for (var i = 0; i < selectedOpeningBook.length; ++i) {
-      if (allMoves.length > selectedOpeningBook[i].length) continue;
-      var maxLength = Math.min(allMoves.length, selectedOpeningBook[i].length);
-      if (allMoves.substring(0, maxLength) == selectedOpeningBook[i].substring(0, maxLength)) {
+      if (isLinePrefix(allMoves, selectedOpeningBook[i])) {
         // Line can be from selectedOpeningBook[i]
         isFromOtherOpening = true;
         candidateOpenings.push(selectedOpeningBook[i]);
@@ -1208,7 +1268,7 @@ function onDrop(source, target) {
         showMessage('openingneededdlg', 'Note', '130px');
         nextMove = '';
       } else {
-        nextMove = getNextMove(chessy.history().join(''), currentLine);
+        nextMove = getNextMove(chessy.history().join(' '), currentLine);
       }
       if (!chessy.isPlayersTurn()) setTimeout(makeOpponentMove, 500);
     } else if (isFromOtherNonSelectedOpening) {
@@ -1242,7 +1302,7 @@ function onDrop(source, target) {
   $('.square-' + move_obj.to).addClass('highlightLastMove');
   playSounds(move);
   timesHintAsked = 0;
-  nextMove = getNextMove(chessy.history().join(''), currentLine);
+  nextMove = getNextMove(chessy.history().join(' '), currentLine);
   updateOpeningText();
 
   //displayComments();
@@ -1363,7 +1423,7 @@ function showOtherOpeningMessage(move) {
     width: '160px', resizable: false,
     buttons: {
       "Yes": function () {
-        var openingMoves = chessy.game.history().join('');
+        var openingMoves = chessy.game.history().join(' ');
         var idname = opening_book[openingMoves][0].replace(/[^a-zA-Z0-9]/g,"");
 
         var allParents = [];
@@ -1383,12 +1443,10 @@ function showOtherOpeningMessage(move) {
 
         $("#" + idname).click();
 
-        var allMoves = chessy.game.history().join('');
+        var allMoves = chessy.game.history().join(' ');
         var candidateOpenings = [];
         for (var i = 0; i < selectedOpeningBook.length; ++i) {
-          if (allMoves.length > selectedOpeningBook[i].length) continue;
-          var maxLength = Math.min(allMoves.length, selectedOpeningBook[i].length);
-          if (allMoves.substring(0, maxLength) == selectedOpeningBook[i].substring(0, maxLength)) {
+          if (isLinePrefix(allMoves, selectedOpeningBook[i])) {
             // Line can be from selectedOpeningBook[i]
             isFromOtherOpening = true;
             candidateOpenings.push(selectedOpeningBook[i]);
@@ -1402,7 +1460,7 @@ function showOtherOpeningMessage(move) {
           showMessage('openingneededdlg', 'Note', '130px');
           nextMove = '';
         } else {
-          nextMove = getNextMove(chessy.history().join(''), currentLine);
+          nextMove = getNextMove(chessy.history().join(' '), currentLine);
         }
 
         $("#warning").text("");
@@ -1413,7 +1471,7 @@ function showOtherOpeningMessage(move) {
         $('.square-' + move_obj.to).addClass('highlightLastMove');
         playSounds(move);
         timesHintAsked = 0;
-        nextMove = getNextMove(chessy.history().join(''), currentLine);
+        nextMove = getNextMove(chessy.history().join(' '), currentLine);
         updateOpeningText();
 
         setTimeout(makeOpponentMove, 500);
@@ -1455,11 +1513,11 @@ function makeOpponentMove() {
 
   updateOpeningText();
 
-  nextMove = getNextMove(chessy.history().join(''), currentLine);
+  nextMove = getNextMove(chessy.history().join(' '), currentLine);
 }
 
 function updateOpeningText() {
-  let history = chessy.history().join('');
+  let history = chessy.history().join(' ');
   if (history in opening_book) {
     currentOpening = opening_book[history][0];
     $('#opening').text(currentOpening);
@@ -1471,7 +1529,7 @@ function updateOpeningText() {
     $('#link').html(
       '<a href="https://lichess.org/analysis/pgn/' +
       // chessy.history()
-      currentLine.match(halfMoveRegex)
+      currentLine.split(' ')
 	.join('_') +
       '" target="_blank">lichess analysis</a>'
     )
@@ -1487,51 +1545,12 @@ function updateSelectedOpeningBook() {
 
 // Helper functions
 
-function splitStringIntoMoves(history) {
-  moveArray = [];
-
-  while (history.length > 0) {
-    if (history.indexOf('O-O-O') == 0) {
-      moveArray.push('O-O-O');
-      history = history.substring(5);
-      continue;
-    } else if (history.indexOf('O-O') == 0) {
-      moveArray.push('O-O');
-      history = history.substring(3);
-      continue;
-    }
-
-    digitIndex = 0;
-    for (var i = 0; i < history.length; ++i) {
-      if (history[i] >= '0' && history[i] <= '9') {
-        if ((i > 0 && history[i-1] == 'N') || (i > 0 && history[i-1] == 'R')) continue;
-        digitIndex = i;
-        break;
-      }
-    }
-
-    if (history.length > digitIndex + 1) {
-      if (history[digitIndex+1] == '+' || history[digitIndex+1] == '#') {
-        digitIndex += 1;
-      }
-    }
-
-    // Check for promotions
-    if (history.length > digitIndex + 1) {
-      if (history[digitIndex+1] == '=') {
-        digitIndex += 2;
-      }
-    }
-
-    moveArray.push(history.substring(0, digitIndex+1));
-    history = history.substring(digitIndex+1);
-  }
-  return moveArray;
+function splitStringIntoMoves(line) {
+  return line === '' ? [] : line.split(' ');
 }
 
 function getNextMove(history, line) {
-  var futureline = line.substring(history.length);
-  var splitMoves = splitStringIntoMoves(futureline);
+  var splitMoves = splitStringIntoMoves(line).slice(splitStringIntoMoves(history).length);
 
   if (splitMoves.length == 0) {
     // Game over
@@ -1539,7 +1558,7 @@ function getNextMove(history, line) {
     gameover = true;
     $('#soundSuccess').get(0).play();
     if (!updatedHistory) {
-      srs.doneLine(chessy.history().join(''), perfectLine);
+      srs.doneLine(chessy.history().join(' '), perfectLine);
       updatedHistory = true;
     }
     if (srs.hasMoreLinesDue(selectedOpeningBook)) {
@@ -1644,7 +1663,7 @@ $('body').layout({
 
 currentLine = srs.getNextLine(selectedOpeningBook);
 //getComments("");
-nextMove = getNextMove(chessy.history().join(''), currentLine);
+nextMove = getNextMove(chessy.history().join(' '), currentLine);
 setTimeout(showWelcome, 600);
 addToolTipToOpening("King's Pawn Opening, General");
 addToolTipToOpening("Queen Pawn Opening, General");

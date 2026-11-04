@@ -13,11 +13,11 @@ my %overall-cache;
 for <white black> -> $color {
 	say "$color";
 	for %openings{$color}.pairs {
-		say join ' ', .key.match: /<Chess::PGN::SAN><Chess::PGN::annotation>?/, :g;
+		say join ' ', .key.words;
 		for .value.list -> $line {
 			my %local-cache;
 			#my Chess::Position $pos .= new;
-			say "\t" ~ join ' ', $line.match: /<Chess::PGN::SAN><Chess::PGN::annotation>?/, :g;
+			say "\t" ~ join ' ', $line.words;
 		}
 	}
 }
@@ -25,7 +25,7 @@ for <white black> -> $color {
 =finish
 next unless /^e4/;
 state %cache;
-given .match(/^[<Chess::PGN::SAN><Chess::PGN::annotation>?]+$/) -> $/ {
+given .match(/^[<Chess::PGN::SAN><Chess::PGN::annotation>?]+ % ' '$/) -> $/ {
 	my @moves = $<Chess::PGN::SAN>.map: *.Str;
 	my Chess::Position $position .= new;
 	for @moves -> $move {
