@@ -54,6 +54,7 @@
 					a.href = "https://github.com/grondilu/memchess/commit/" + sha;
 					a.textContent = sha.slice(0, 7) || "?";
 					el.appendChild(a);
+					if (v.dirty) el.appendChild(document.createTextNode(" + modifications locales"));
 				}).catch(function () {});
 			</script>
 
